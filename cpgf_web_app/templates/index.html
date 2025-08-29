@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CPGF Image Converter</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f4f4f9;
+    color: #333;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+  }
+  h1 {
+    color: #222;
+    margin-bottom: 30px;
+  }
+  .card-container {
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 1200px;
+  }
+  .card {
+    background: #fff;
+    padding: 25px 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    width: 100%;
+    max-width: 500px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .section-title {
+    font-size: 18px;
+    margin-bottom: 10px;
+    color: #555;
+    font-weight: bold;
+  }
+  p.instruction {
+    font-size: 13px;
+    color: #666;
+    margin-top: 5px;
+    text-align: center;
+  }
+  label {
+    display: block;
+    margin-top: 15px;
+    font-weight: bold;
+    width: 100%;
+  }
+  input[type="file"], input[type="number"], button {
+    margin-top: 10px;
+    padding: 8px;
+    width: 100%;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+  }
+  button {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+    margin-top: 15px;
+  }
+  button:hover { background-color: #45a049; }
+  canvas {
+    margin-top: 15px;
+    border: 2px solid #ccc;
+    image-rendering: pixelated;
+    max-width: 100%;
+  }
+  .meta {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #555;
+    text-align: center;
+  }
+  .download-btn {
+    background-color: #2196F3;
+  }
+  .download-btn:hover {
+    background-color: #1976D2;
+  }
+</style>
+</head>
+<body>
+
+<h1>🔄 CPGF Image Converter & Preview</h1>
+
+<div class="card-container">
+  <!-- PNG to CPGF -->
+  <section class="card">
+    <div class="section-title">1️⃣ PNG → CPGF</div>
+    <p class="instruction">Upload a PNG, choose pixelation block size, then preview & download.</p>
+    <form id="pngForm">
+      <label>Choose PNG image</label>
+      <input type="file" name="image" id="pngInput" accept="image/png" required>
+      
+      <label>Block size (larger = more pixelated)</label>
+      <input type="number" id="blockSize" value="20" min="1" max="100">
+      
+      <button type="submit">Convert</button>
+    </form>
+    <canvas id="previewCanvas"></canvas>
+    <div class="meta" id="pngMeta"></div>
+    <button id="downloadCpgf" class="download-btn" style="display:none;">⬇️ Download CPGF</button>
+  </section>
+
+  <!-- CPGF to PNG -->
+  <section class="card">
+    <div class="section-title">2️⃣ CPGF → PNG</div>
+    <p class="instruction">Upload a CPGF file to see it rendered and compare sizes.</p>
+    <input type="file" id="cpgfUpload" accept=".cpgf">
+    <canvas id="cpgfCanvas"></canvas>
+    <div class="meta" id="cpgfMeta"></div>
+    <button id="downloadPng" class="download-btn" style="display:none;">⬇️ Download PNG</button>
+  </section>
+</div>
+
+<script>
+const pngForm = document.getElementById('pngForm');
+const pngInput = document.getElementById('pngInput');
+const blockInput = document.getElementById('blockSize');
+const previewCanvas = document.getElementById('previewCanvas');
+const pctx = previewCanvas.getContext('2d');
+const pngMeta = document.getElementById('pngMeta');
+const downloadCpgfBtn = document.getElementById('downloadCpgf');
+
+const cpgfCanvas = document.getElementById('cpgfCanvas');
+const cctx = cpgfCanvas.getContext('2d');
+const cpgfMeta = document.getElementById('cpgfMeta');
+const downloadPngBtn = document.getElementById('downloadPng');
+
+let lastCpgfBlob = null;
+
+// PNG → CPGF
+pngForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const file = pngInput.files[0];
+  if (!file) return;
+
+  const blockSize = blockInput.value;
+  const formData = new FormData();
+  formData.append('image', file);
+  formData.append('block_size', blockSize);
+
+  // fake server call — replace with your backend route
+  const res = await fetch('/upload_png', {method:'POST', body: formData});
+  const blob = await res.blob();
+
+  lastCpgfBlob = blob;
+
+  const img = new Image();
+  img.src = URL.createObjectURL(blob);
+  img.onload = () => {
+    previewCanvas.width = img.width;
+    previewCanvas.height = img.height;
+    pctx.drawImage(img, 0, 0);
+  };
+
+  pngMeta.textContent = `Original PNG: ${(file.size/1024).toFixed(1)} KB → CPGF: ${(blob.size/1024).toFixed(1)} KB`;
+  downloadCpgfBtn.style.display = 'block';
+  downloadCpgfBtn.onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'image.cpgf';
+    a.click();
+  };
+});
+
+// CPGF → PNG
+document.getElementById('cpgfUpload').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const buffer = await file.arrayBuffer();
+  const view = new DataView(buffer);
+
+  const magic = new TextDecoder().decode(new Uint8Array(buffer, 0, 5));
+  if (magic !== "CPGF\u0001") { alert("Invalid CPGF file"); return; }
+
+  let offset = 5;
+  const w = view.getUint32(offset, true); offset += 4;
+  const h = view.getUint32(offset, true); offset += 4;
+  offset += 4; 
+
+  cpgfCanvas.width = w;
+  cpgfCanvas.height = h;
+  const imageData = cctx.createImageData(w, h);
+  let i = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      imageData.data[i]   = view.getUint8(offset++);
+      imageData.data[i+1] = view.getUint8(offset++);
+      imageData.data[i+2] = view.getUint8(offset++);
+      imageData.data[i+3] = 255;
+      i += 4;
+    }
+  }
+  cctx.putImageData(imageData, 0, 0);
+
+  // PNG export
+  const pngBlob = await new Promise(resolve => cpgfCanvas.toBlob(resolve, "image/png"));
+  cpgfMeta.textContent = `CPGF: ${(file.size/1024).toFixed(1)} KB → PNG: ${(pngBlob.size/1024).toFixed(1)} KB`;
+
+  downloadPngBtn.style.display = 'block';
+  downloadPngBtn.onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(pngBlob);
+    a.download = 'reconstructed.png';
+    a.click();
+  };
+});
+</script>
+
+</body>
+</html>
