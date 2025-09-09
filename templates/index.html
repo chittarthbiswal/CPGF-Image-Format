@@ -45,12 +45,12 @@
     border: 1px solid #ccc;
   }
   button {
-    background: #4CAF50;
+    background: #1e3dc7;
     color: white;
     border: none;
     cursor: pointer;
   }
-  button:hover { background: #45a049; }
+  button:hover { background: #b3d314; }
   .download-btn {
     margin-top: 10px;
     background: #2196F3;
@@ -76,35 +76,53 @@
     border: 1px solid #ccc;
     max-width: 100%;
   }
+  /* Highlighted summary card style - simpler text */
+  .summary-card {
+    display: none;
+    background: #e0f7fa;
+    color: #006064;
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 10px;
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    font-weight: bold;
+    
+  }
 </style>
 </head>
 <body>
 
 <!-- PNG -> CPGF -->
 <section class="card">
-  <div class="section-title">1️⃣ PNG → CPGF</div>
-  <p class="instruction">Upload a PNG, convert to CPGF (pixel data only), then download.</p>
+  <div class="section-title">PNG → CPGF</div>
+  <p class="instruction">Upload a PNG, convert to CPGF (pixel data only), then download. After conversion, see how much space was saved.</p>
   <form id="pngForm">
     <label>Choose PNG image</label>
     <input type="file" name="image" id="pngInput" accept="image/png" required>
     
     <label>Block size (larger = more pixelated)</label>
-    <input type="number" id="blockSize" value="20" min="1" max="100">
+    <input type="number" id="blockSize" value="10" min="1" max="100">
     
-    <button type="submit">Convert</button>
+    <button type="submit">Convert to CPGF Format</button>
   </form>
   <div class="meta" id="pngMeta"></div>
+  <div class="meta" id="cpgfMeta" style="margin-top:5px;"></div>
   <div id="previewData"></div>
   <button id="downloadCpgf" class="download-btn" style="display:none;">⬇️ Download CPGF</button>
 </section>
 
 <!-- CPGF -> PNG -->
 <section class="card">
-  <div class="section-title">2️⃣ CPGF → PNG</div>
+  <div class="section-title">CPGF → PNG</div>
   <p class="instruction">Upload a CPGF file to decode & preview as PNG.</p>
   <input type="file" id="cpgfUpload" accept=".cpgf">
   <canvas id="cpgfCanvas"></canvas>
-  <div class="meta" id="cpgfMeta"></div>
+  
+  <!-- Summary card for conversion info -->
+  <div id="conversionSummary" class="summary-card"></div>
+  
+  <div class="meta" id="cpgfMetaDecode"></div>
 </section>
 
 <script>
@@ -117,7 +135,7 @@ function decodeCpgfToText(buffer) {
   let offset = 5;
   const w = view.getUint32(offset, true); offset += 4;
   const h = view.getUint32(offset, true); offset += 4;
-  offset += 4; // reserved
+  offset += 4;
 
   let output = "";
   for (let y = 0; y < h; y++) {
@@ -138,29 +156,31 @@ const pngForm = document.getElementById('pngForm');
 const pngInput = document.getElementById('pngInput');
 const blockInput = document.getElementById('blockSize');
 const previewData = document.getElementById('previewData');
+const pngMeta = document.getElementById('pngMeta');
+const cpgfMeta = document.getElementById('cpgfMeta');
+const dlBtn = document.getElementById('downloadCpgf');
+const conversionSummary = document.getElementById('conversionSummary');
 
 pngForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const file = pngInput.files[0];
   if (!file) return;
 
-  // Show original PNG size
-  document.getElementById("pngMeta").textContent = `PNG size: ${(file.size/1024).toFixed(1)} KB`;
+  const originalKB = (file.size/1024).toFixed(1);
+  pngMeta.textContent = `Original PNG size: ${originalKB} KB`;
 
-  // Send to backend
   const formData = new FormData();
   formData.append('image', file);
   formData.append('block_size', blockInput.value);
 
-  const res = await fetch('/upload_png', {method:'POST', body: formData});
+  const res = await fetch('/upload_png', { method: 'POST', body: formData });
   const blob = await res.blob();
   const buffer = await blob.arrayBuffer();
 
-  // Show pixel data
+  // Preview pixel data
   previewData.textContent = decodeCpgfToText(buffer);
 
   // Download button
-  const dlBtn = document.getElementById('downloadCpgf');
   dlBtn.style.display = "inline-block";
   dlBtn.onclick = () => {
     const url = URL.createObjectURL(blob);
@@ -169,12 +189,51 @@ pngForm.addEventListener('submit', async (e) => {
     a.download = 'image.cpgf';
     a.click();
   };
+
+  // Convert CPGF back to PNG in hidden canvas to calculate decoded PNG size
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d');
+  const view = new DataView(buffer);
+  let offset = 5;
+  const w = view.getUint32(offset, true); offset += 4;
+  const h = view.getUint32(offset, true); offset += 4;
+  offset += 4;
+  tempCanvas.width = w;
+  tempCanvas.height = h;
+  const imgData = tempCtx.createImageData(w, h);
+  let i = 0;
+  for (let y=0; y<h; y++) {
+    for (let x=0; x<w; x++) {
+      imgData.data[i] = view.getUint8(offset++);
+      imgData.data[i+1] = view.getUint8(offset++);
+      imgData.data[i+2] = view.getUint8(offset++);
+      imgData.data[i+3] = 255;
+      i += 4;
+    }
+  }
+  tempCtx.putImageData(imgData,0,0);
+
+  tempCanvas.toBlob((pngBlob)=>{
+    const finalKB = (pngBlob.size/1024).toFixed(1);
+    const savedPct = ((file.size - pngBlob.size)/file.size*100).toFixed(1);
+
+    // Show prominently in the summary card (simpler text)
+    conversionSummary.style.display = 'block';
+    conversionSummary.innerHTML = `
+  <ul style="list-style: disc inside; padding-left: 10px; margin:0;">
+    <li>Original PNG size: ${originalKB} KB</li>
+    <li>Final PNG size: ${finalKB} KB</li>
+    <li>Space saved: ${savedPct}%</li>
+  </ul>
+`;
+  },"image/png");
 });
 
 // --- CPGF -> PNG ---
 const cpgfUpload = document.getElementById('cpgfUpload');
 const cpgfCanvas = document.getElementById('cpgfCanvas');
 const cctx = cpgfCanvas.getContext('2d');
+const cpgfMetaDecode = document.getElementById('cpgfMetaDecode');
 
 cpgfUpload.addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -182,7 +241,6 @@ cpgfUpload.addEventListener('change', async (e) => {
   const buffer = await file.arrayBuffer();
   const view = new DataView(buffer);
 
-  // check magic
   const magic = new TextDecoder().decode(new Uint8Array(buffer, 0, 5));
   if (magic !== "CPGF\u0001") { alert("Invalid CPGF file"); return; }
 
@@ -194,10 +252,9 @@ cpgfUpload.addEventListener('change', async (e) => {
   cpgfCanvas.width = w;
   cpgfCanvas.height = h;
   const imageData = cctx.createImageData(w, h);
-
   let i = 0;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
+  for (let y=0; y<h; y++) {
+    for (let x=0; x<w; x++) {
       imageData.data[i] = view.getUint8(offset++);
       imageData.data[i+1] = view.getUint8(offset++);
       imageData.data[i+2] = view.getUint8(offset++);
@@ -205,15 +262,12 @@ cpgfUpload.addEventListener('change', async (e) => {
       i += 4;
     }
   }
-  cctx.putImageData(imageData, 0, 0);
+  cctx.putImageData(imageData,0,0);
 
-  // Show size of PNG equivalent (export canvas to Blob)
-  cpgfCanvas.toBlob((pngBlob) => {
-    document.getElementById("cpgfMeta").textContent =
-      `Decoded image size: ${w}x${h}, PNG file size: ${(pngBlob.size/1024).toFixed(1)} KB`;
-  }, "image/png");
+  cpgfCanvas.toBlob((pngBlob)=>{
+    cpgfMetaDecode.textContent = `Decoded image size: ${w}x${h}, PNG size: ${(pngBlob.size/1024).toFixed(1)} KB`;
+  },"image/png");
 });
 </script>
-
 </body>
 </html>
